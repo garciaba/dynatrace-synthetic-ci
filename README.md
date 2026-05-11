@@ -180,18 +180,56 @@ jobs:
 
 ## Development
 
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) (v20 or later)
+- npm (comes with Node.js)
+
+### Getting started
+
 ```bash
-# Install dependencies
+# 1. Install dependencies
 npm install
+```
 
-# Build the bundled action
+This installs all packages listed in `package.json`, including:
+- **`@actions/core`** and **`@actions/http-client`** — the GitHub Actions SDK used at runtime.
+- **`@vercel/ncc`** and **`typescript`** — dev tools for compiling and bundling.
+
+### Building
+
+```bash
+# 2. Build the bundled action
 npm run build
+```
 
-# Type-check without emitting
+This runs [`@vercel/ncc`](https://github.com/vercel/ncc) to compile the TypeScript source in `src/` and bundle **all** dependencies into a single file at `dist/index.js`. This is the file that GitHub Actions actually executes.
+
+### Type-checking
+
+```bash
+# 3. Type-check without emitting files
 npm run typecheck
 ```
 
-The `dist/` folder must be committed — GitHub Actions runners load it directly without running `npm install`.
+Runs the TypeScript compiler in check-only mode (`tsc --noEmit`). It validates types across the codebase without producing any output files — useful to catch errors before building.
+
+### Why `dist/` must be committed
+
+Unlike a normal Node.js project, GitHub Actions **does not run `npm install`** on the runner. When your action executes, GitHub clones the repository and directly runs the file specified in `action.yml` (in this case `dist/index.js`). That means:
+
+- The bundled `dist/` folder **must be checked into git** so the runner can find it.
+- After every code change, you need to run `npm run build` and commit the updated `dist/` folder.
+
+A typical development cycle looks like:
+
+```bash
+# Make your changes in src/
+npm run typecheck   # Catch type errors early
+npm run build       # Re-bundle into dist/
+git add -A
+git commit -m "your change description"
+```
 
 ## Project structure
 
