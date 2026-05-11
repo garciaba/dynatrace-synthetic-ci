@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Run Dynatrace Synthetic monitors using the Node.js action.
       # For additional configuration options see action.yml at the repository root.

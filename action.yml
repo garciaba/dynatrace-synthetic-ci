@@ -63,5 +63,5 @@ outputs:
     description: 'Final batch status (e.g. SUCCESS, FAILED, FAILED_TO_EXECUTE).'
 
 runs:
-  using: 'node20'
+  using: 'node24'
   main: 'dist/index.js'
