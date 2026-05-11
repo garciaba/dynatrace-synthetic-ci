@@ -21,9 +21,9 @@ name: Run Dynatrace Synthetic tests
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "master" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "master" ]
 
   # Allow manual trigger with customizable parameters
   workflow_dispatch:
