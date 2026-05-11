@@ -1,0 +1,69 @@
+# This workflow triggers Dynatrace Synthetic monitor executions and reports results.
+# It uses the Dynatrace Synthetic CI action (Node.js) which calls the Synthetic API v2
+# to trigger on-demand batch executions, poll for completion, and fail the workflow
+# if any monitor reports a failure.
+#
+# For more information on the Synthetic API v2, see:
+# https://docs.dynatrace.com/docs/shortlink/api-synthetic-v2-monitor-executions
+#
+# To get started:
+#
+# 1. Add your Dynatrace Environment URL (DT_ENVIRONMENT_URL) as a secret.
+#    Example: https://abc12345.live.dynatrace.com  (no trailing slash)
+#
+# 2. Add your Dynatrace API Token (DT_API_TOKEN) as a secret.
+#    Required scopes: syntheticExecutions.write, syntheticExecutions.read
+#    See: https://docs.dynatrace.com/docs/discover-dynatrace/references/dynatrace-api/basics/dynatrace-api-authentication
+#
+# 3. Customize the inputs below to match your monitor tagging strategy.
+
+name: Run Dynatrace Synthetic tests
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+  # Allow manual trigger with customizable parameters
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: 'Comma-separated tags to filter monitors (e.g. "e2e-tests,production")'
+        required: false
+        default: 'e2e-tests'
+      monitor_ids:
+        description: 'Comma-separated monitor IDs to execute (overrides tags if set)'
+        required: false
+        default: ''
+      fail_on_performance_issue:
+        description: 'Fail if a performance issue is detected'
+        required: false
+        type: boolean
+        default: true
+      fail_on_ssl_warning:
+        description: 'Fail on SSL certificate warnings (HTTP monitors only)'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  synthetic-tests:
+    name: Dynatrace Synthetic Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Run Dynatrace Synthetic monitors using the Node.js action.
+      # For additional configuration options see action.yml at the repository root.
+      - name: Run Dynatrace Synthetic tests
+        id: synthetic
+        uses: ./
+        with:
+          environment_url: ${{ secrets.DT_ENVIRONMENT_URL }}
+          api_token: ${{ secrets.DT_API_TOKEN }}
+          tags: ${{ github.event.inputs.tags || 'e2e-tests' }}
+          monitor_ids: ${{ github.event.inputs.monitor_ids }}
+          fail_on_performance_issue: ${{ github.event.inputs.fail_on_performance_issue || 'true' }}
+          fail_on_ssl_warning: ${{ github.event.inputs.fail_on_ssl_warning || 'true' }}

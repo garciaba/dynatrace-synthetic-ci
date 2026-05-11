@@ -1,0 +1,316 @@
+name: 'Dynatrace Synthetic CI'
+description: 'Trigger on-demand Dynatrace Synthetic monitor executions and wait for results. Equivalent to DataDog/synthetics-ci-github-action for Dynatrace.'
+author: 'Dynatrace'
+
+branding:
+  icon: 'activity'
+  color: 'green'
+
+inputs:
+  environment_url:
+    description: 'Dynatrace Environment URL (e.g. https://abc12345.live.dynatrace.com). No trailing slash.'
+    required: true
+  api_token:
+    description: 'Dynatrace API Token. Required scopes: syntheticExecutions.write, syntheticExecutions.read'
+    required: true
+  tags:
+    description: 'Comma-separated tags to filter monitors (e.g. "e2e-tests,production"). Ignored if monitor_ids is set.'
+    required: false
+    default: ''
+  monitor_ids:
+    description: 'Comma-separated monitor IDs to execute (e.g. "HTTP_CHECK-ABC123,BROWSER_MONITOR-DEF456"). Overrides tags.'
+    required: false
+    default: ''
+  applications:
+    description: 'Comma-separated application IDs. Only monitors with all listed applications assigned will run.'
+    required: false
+    default: ''
+  services:
+    description: 'Comma-separated service IDs. Only monitors with all listed services assigned will run.'
+    required: false
+    default: ''
+  locations:
+    description: 'Comma-separated location IDs to execute from (e.g. "SYNTHETIC_LOCATION-ABC123").'
+    required: false
+    default: ''
+  fail_on_performance_issue:
+    description: 'Fail the execution if a performance issue is detected.'
+    required: false
+    default: 'true'
+  fail_on_ssl_warning:
+    description: 'Fail on SSL certificate warnings (HTTP monitors only).'
+    required: false
+    default: 'true'
+  poll_interval:
+    description: 'Seconds between polling attempts for results.'
+    required: false
+    default: '30'
+  timeout:
+    description: 'Maximum seconds to wait for all executions to complete.'
+    required: false
+    default: '600'
+
+outputs:
+  batch_id:
+    description: 'The batch ID of the triggered execution.'
+    value: ${{ steps.trigger.outputs.batch_id }}
+  triggered_count:
+    description: 'Number of monitor executions triggered.'
+    value: ${{ steps.trigger.outputs.triggered_count }}
+  executed_count:
+    description: 'Number of monitor executions that completed.'
+    value: ${{ steps.poll.outputs.executed_count }}
+  failed_count:
+    description: 'Number of monitor executions that failed.'
+    value: ${{ steps.poll.outputs.failed_count }}
+  batch_status:
+    description: 'Final batch status (e.g. SUCCESS, FAILED, FAILED_TO_EXECUTE).'
+    value: ${{ steps.poll.outputs.batch_status }}
+
+runs:
+  using: 'composite'
+  steps:
+    # ------------------------------------------------------------------
+    # Step 1: Trigger on-demand batch execution
+    # ------------------------------------------------------------------
+    - name: Trigger Dynatrace Synthetic monitors
+      id: trigger
+      shell: bash
+      env:
+        DT_ENV_URL: ${{ inputs.environment_url }}
+        DT_API_TOKEN: ${{ inputs.api_token }}
+        INPUT_TAGS: ${{ inputs.tags }}
+        INPUT_MONITOR_IDS: ${{ inputs.monitor_ids }}
+        INPUT_APPLICATIONS: ${{ inputs.applications }}
+        INPUT_SERVICES: ${{ inputs.services }}
+        INPUT_LOCATIONS: ${{ inputs.locations }}
+        INPUT_FAIL_PERF: ${{ inputs.fail_on_performance_issue }}
+        INPUT_FAIL_SSL: ${{ inputs.fail_on_ssl_warning }}
+      run: |
+        set -euo pipefail
+
+        # --- Helper: comma-separated string to JSON array ---
+        csv_to_json_array() {
+          local csv="$1"
+          local arr="["
+          local first=true
+          IFS=',' read -ra ITEMS <<< "$csv"
+          for item in "${ITEMS[@]}"; do
+            item=$(echo "$item" | xargs)
+            [ -z "$item" ] && continue
+            if [ "$first" = true ]; then first=false; else arr+=","; fi
+            arr+="\"${item}\""
+          done
+          arr+="]"
+          echo "$arr"
+        }
+
+        # --- Build request body ---
+        if [ -n "$INPUT_MONITOR_IDS" ]; then
+          # Build monitors array with optional locations
+          MONITORS_JSON="["
+          FIRST=true
+          IFS=',' read -ra IDS <<< "$INPUT_MONITOR_IDS"
+          for ID in "${IDS[@]}"; do
+            ID=$(echo "$ID" | xargs)
+            [ -z "$ID" ] && continue
+            if [ "$FIRST" = true ]; then FIRST=false; else MONITORS_JSON+=","; fi
+            if [ -n "$INPUT_LOCATIONS" ]; then
+              LOC_JSON=$(csv_to_json_array "$INPUT_LOCATIONS")
+              MONITORS_JSON+="{\"monitorId\":\"${ID}\",\"locations\":${LOC_JSON}}"
+            else
+              MONITORS_JSON+="{\"monitorId\":\"${ID}\"}"
+            fi
+          done
+          MONITORS_JSON+="]"
+
+          REQUEST_BODY=$(jq -n \
+            --argjson monitors "$MONITORS_JSON" \
+            --argjson failPerf "$INPUT_FAIL_PERF" \
+            --argjson failSsl "$INPUT_FAIL_SSL" \
+            '{
+              monitors: $monitors,
+              failOnPerformanceIssue: $failPerf,
+              failOnSslWarning: $failSsl,
+              metadata: {
+                source: "github-actions",
+                repository: $ENV.GITHUB_REPOSITORY,
+                run_id: $ENV.GITHUB_RUN_ID,
+                sha: $ENV.GITHUB_SHA
+              }
+            }')
+        else
+          # Build group object from tags / applications / services
+          GROUP_PARTS=""
+
+          if [ -n "$INPUT_TAGS" ]; then
+            TAGS_JSON=$(csv_to_json_array "$INPUT_TAGS")
+            GROUP_PARTS+="tags: $TAGS_JSON,"
+          fi
+          if [ -n "$INPUT_APPLICATIONS" ]; then
+            APPS_JSON=$(csv_to_json_array "$INPUT_APPLICATIONS")
+            GROUP_PARTS+="applications: $APPS_JSON,"
+          fi
+          if [ -n "$INPUT_SERVICES" ]; then
+            SVCS_JSON=$(csv_to_json_array "$INPUT_SERVICES")
+            GROUP_PARTS+="services: $SVCS_JSON,"
+          fi
+          if [ -n "$INPUT_LOCATIONS" ]; then
+            LOCS_JSON=$(csv_to_json_array "$INPUT_LOCATIONS")
+            GROUP_PARTS+="locations: $LOCS_JSON,"
+          fi
+
+          if [ -z "$GROUP_PARTS" ]; then
+            echo "::error::You must specify at least one of: tags, monitor_ids, applications, or services."
+            exit 1
+          fi
+
+          REQUEST_BODY=$(jq -n \
+            --argjson failPerf "$INPUT_FAIL_PERF" \
+            --argjson failSsl "$INPUT_FAIL_SSL" \
+            "{ group: { ${GROUP_PARTS%,} }, failOnPerformanceIssue: \$failPerf, failOnSslWarning: \$failSsl, metadata: { source: \"github-actions\", repository: \"$GITHUB_REPOSITORY\", run_id: \"$GITHUB_RUN_ID\", sha: \"$GITHUB_SHA\" } }")
+        fi
+
+        echo "::group::Request body"
+        echo "$REQUEST_BODY" | jq .
+        echo "::endgroup::"
+
+        # --- Trigger batch execution ---
+        HTTP_RESPONSE=$(mktemp)
+        HTTP_CODE=$(curl -s -o "$HTTP_RESPONSE" -w "%{http_code}" \
+          -X POST "${DT_ENV_URL}/api/v2/synthetic/executions/batch" \
+          -H "Authorization: Api-Token ${DT_API_TOKEN}" \
+          -H "Content-Type: application/json" \
+          -d "$REQUEST_BODY")
+
+        BODY=$(cat "$HTTP_RESPONSE")
+        rm -f "$HTTP_RESPONSE"
+
+        if [ "$HTTP_CODE" != "201" ]; then
+          echo "::error::Failed to trigger synthetic monitors (HTTP $HTTP_CODE)"
+          echo "$BODY" | jq . 2>/dev/null || echo "$BODY"
+          exit 1
+        fi
+
+        BATCH_ID=$(echo "$BODY" | jq -r '.batchId')
+        TRIGGERED_COUNT=$(echo "$BODY" | jq -r '.triggeredCount')
+        PROBLEMS_COUNT=$(echo "$BODY" | jq -r '.triggeringProblemsCount')
+
+        echo "### Dynatrace Synthetic — Batch Triggered" >> "$GITHUB_STEP_SUMMARY"
+        echo "- **Batch ID:** \`$BATCH_ID\`" >> "$GITHUB_STEP_SUMMARY"
+        echo "- **Triggered:** $TRIGGERED_COUNT execution(s)" >> "$GITHUB_STEP_SUMMARY"
+
+        if [ "$PROBLEMS_COUNT" -gt 0 ]; then
+          echo "::warning::$PROBLEMS_COUNT triggering problem(s) encountered"
+          echo "- **Triggering problems:** $PROBLEMS_COUNT" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          echo "$BODY" | jq '.triggeringProblemsDetails[]?' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        if [ "$TRIGGERED_COUNT" -eq 0 ]; then
+          echo "::error::No monitors were triggered. Verify tags/monitor IDs and ensure matching monitors exist."
+          exit 1
+        fi
+
+        echo "batch_id=$BATCH_ID" >> "$GITHUB_OUTPUT"
+        echo "triggered_count=$TRIGGERED_COUNT" >> "$GITHUB_OUTPUT"
+
+        echo "::group::Triggered monitors"
+        echo "$BODY" | jq '.triggered[]?'
+        echo "::endgroup::"
+
+    # ------------------------------------------------------------------
+    # Step 2: Poll for batch completion
+    # ------------------------------------------------------------------
+    - name: Wait for Synthetic execution results
+      id: poll
+      shell: bash
+      env:
+        DT_ENV_URL: ${{ inputs.environment_url }}
+        DT_API_TOKEN: ${{ inputs.api_token }}
+        BATCH_ID: ${{ steps.trigger.outputs.batch_id }}
+        TRIGGERED_COUNT: ${{ steps.trigger.outputs.triggered_count }}
+        POLL_INTERVAL: ${{ inputs.poll_interval }}
+        TIMEOUT: ${{ inputs.timeout }}
+      run: |
+        set -euo pipefail
+
+        ELAPSED=0
+
+        echo "Polling batch $BATCH_ID every ${POLL_INTERVAL}s (timeout: ${TIMEOUT}s)..."
+
+        while [ "$ELAPSED" -lt "$TIMEOUT" ]; do
+          sleep "$POLL_INTERVAL"
+          ELAPSED=$((ELAPSED + POLL_INTERVAL))
+
+          STATUS_RESPONSE=$(curl -s \
+            "${DT_ENV_URL}/api/v2/synthetic/executions/batch/${BATCH_ID}" \
+            -H "Authorization: Api-Token ${DT_API_TOKEN}")
+
+          BATCH_STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.batchStatus')
+          EXECUTED=$(echo "$STATUS_RESPONSE" | jq -r '.executedCount')
+          FAILED=$(echo "$STATUS_RESPONSE" | jq -r '.failedCount')
+          FAILED_TO_EXEC=$(echo "$STATUS_RESPONSE" | jq -r '.failedToExecuteCount')
+
+          echo "[${ELAPSED}s] Status: $BATCH_STATUS | Executed: $EXECUTED/$TRIGGERED_COUNT | Failed: $FAILED | FailedToExecute: $FAILED_TO_EXEC"
+
+          TOTAL_DONE=$((EXECUTED + FAILED_TO_EXEC))
+          if [ "$TOTAL_DONE" -ge "$TRIGGERED_COUNT" ]; then
+
+            # --- Write outputs ---
+            echo "batch_status=$BATCH_STATUS" >> "$GITHUB_OUTPUT"
+            echo "executed_count=$EXECUTED" >> "$GITHUB_OUTPUT"
+            echo "failed_count=$FAILED" >> "$GITHUB_OUTPUT"
+
+            # --- Write summary ---
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Dynatrace Synthetic — Results" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Metric | Count |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Triggered | $TRIGGERED_COUNT |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Executed | $EXECUTED |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Failed | $FAILED |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Failed to execute | $FAILED_TO_EXEC |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| **Status** | **$BATCH_STATUS** |" >> "$GITHUB_STEP_SUMMARY"
+
+            if [ "$FAILED" -gt 0 ]; then
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "#### Failed executions" >> "$GITHUB_STEP_SUMMARY"
+              echo '```json' >> "$GITHUB_STEP_SUMMARY"
+              echo "$STATUS_RESPONSE" | jq '.failedExecutions[]?' >> "$GITHUB_STEP_SUMMARY"
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+              echo "::error::$FAILED synthetic monitor(s) failed"
+              echo "::group::Failed execution details"
+              echo "$STATUS_RESPONSE" | jq '.failedExecutions[]?'
+              echo "::endgroup::"
+              exit 1
+            fi
+
+            if [ "$FAILED_TO_EXEC" -gt 0 ]; then
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "#### Failed-to-execute" >> "$GITHUB_STEP_SUMMARY"
+              echo '```json' >> "$GITHUB_STEP_SUMMARY"
+              echo "$STATUS_RESPONSE" | jq '.failedToExecute[]?' >> "$GITHUB_STEP_SUMMARY"
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+              echo "::error::$FAILED_TO_EXEC execution(s) failed to execute (engine timeout)"
+              echo "::group::Failed-to-execute details"
+              echo "$STATUS_RESPONSE" | jq '.failedToExecute[]?'
+              echo "::endgroup::"
+              exit 1
+            fi
+
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**All $EXECUTED monitor(s) passed.**" >> "$GITHUB_STEP_SUMMARY"
+            echo "All $EXECUTED synthetic monitor(s) passed!"
+            exit 0
+          fi
+        done
+
+        echo "batch_status=TIMEOUT" >> "$GITHUB_OUTPUT"
+        echo "executed_count=$EXECUTED" >> "$GITHUB_OUTPUT"
+        echo "failed_count=$FAILED" >> "$GITHUB_OUTPUT"
+        echo "::error::Timed out after ${TIMEOUT}s waiting for batch $BATCH_ID ($TOTAL_DONE/$TRIGGERED_COUNT done)"
+        exit 1

@@ -1,0 +1,28 @@
+{
+  "name": "dynatrace-synthetic-ci",
+  "version": "1.0.0",
+  "description": "GitHub Action to trigger and monitor Dynatrace Synthetic test executions in CI/CD pipelines",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "ncc build src/index.ts --source-map --license licenses.txt",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "dynatrace",
+    "synthetic",
+    "monitoring",
+    "github-actions",
+    "ci-cd"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@actions/core": "^1.10.1",
+    "@actions/http-client": "^2.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@vercel/ncc": "^0.38.1",
+    "typescript": "^5.3.3"
+  }
+}

@@ -1,0 +1,67 @@
+name: 'Dynatrace Synthetic CI'
+description: 'Trigger on-demand Dynatrace Synthetic monitor executions and wait for results. Equivalent to DataDog/synthetics-ci-github-action for Dynatrace.'
+author: 'Dynatrace'
+
+branding:
+  icon: 'activity'
+  color: 'green'
+
+inputs:
+  environment_url:
+    description: 'Dynatrace Environment URL (e.g. https://abc12345.live.dynatrace.com). No trailing slash.'
+    required: true
+  api_token:
+    description: 'Dynatrace API Token. Required scopes: syntheticExecutions.write, syntheticExecutions.read'
+    required: true
+  tags:
+    description: 'Comma-separated tags to filter monitors (e.g. "e2e-tests,production"). Ignored if monitor_ids is set.'
+    required: false
+    default: ''
+  monitor_ids:
+    description: 'Comma-separated monitor IDs to execute (e.g. "HTTP_CHECK-ABC123,BROWSER_MONITOR-DEF456"). Overrides tags.'
+    required: false
+    default: ''
+  applications:
+    description: 'Comma-separated application IDs. Only monitors with all listed applications assigned will run.'
+    required: false
+    default: ''
+  services:
+    description: 'Comma-separated service IDs. Only monitors with all listed services assigned will run.'
+    required: false
+    default: ''
+  locations:
+    description: 'Comma-separated location IDs to execute from (e.g. "SYNTHETIC_LOCATION-ABC123").'
+    required: false
+    default: ''
+  fail_on_performance_issue:
+    description: 'Fail the execution if a performance issue is detected.'
+    required: false
+    default: 'true'
+  fail_on_ssl_warning:
+    description: 'Fail on SSL certificate warnings (HTTP monitors only).'
+    required: false
+    default: 'true'
+  poll_interval:
+    description: 'Seconds between polling attempts for results.'
+    required: false
+    default: '30'
+  timeout:
+    description: 'Maximum seconds to wait for all executions to complete.'
+    required: false
+    default: '600'
+
+outputs:
+  batch_id:
+    description: 'The batch ID of the triggered execution.'
+  triggered_count:
+    description: 'Number of monitor executions triggered.'
+  executed_count:
+    description: 'Number of monitor executions that completed.'
+  failed_count:
+    description: 'Number of monitor executions that failed.'
+  batch_status:
+    description: 'Final batch status (e.g. SUCCESS, FAILED, FAILED_TO_EXECUTE).'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
