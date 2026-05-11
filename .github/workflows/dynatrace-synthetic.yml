@@ -64,6 +64,6 @@ jobs:
           environment_url: ${{ secrets.DT_ENVIRONMENT_URL }}
           api_token: ${{ secrets.DT_API_TOKEN }}
           tags: ${{ github.event.inputs.tags }}
-          monitor_ids: ${{ github.event.inputs.monitor_ids || 'SYNTHETIC_TEST-76222220F63BF8E8,HTTP_CHECK-31614F85578EF967,HTTP_CHECK-FF3E86C20A60AE01,HTTP_CHECK-45742EF635F04CE6' }}
+          monitor_ids: ${{ github.event.inputs.monitor_ids || secrets.DT_MONITOR_IDS }}
           fail_on_performance_issue: ${{ github.event.inputs.fail_on_performance_issue || 'true' }}
           fail_on_ssl_warning: ${{ github.event.inputs.fail_on_ssl_warning || 'true' }}
